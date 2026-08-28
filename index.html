@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Floor Plan Manager</title>
+<style>
+:root{--bg:#111318;--panel:#171a21;--panel2:#1d212a;--text:#f5f7fa;--muted:#aab2bf;--border:#323844;--accent:#2f80ed;--danger:#9c3e3e}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
+body{min-height:100vh}
+button,input,select{font:inherit}
+.app{padding:18px}
+.topbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:12px}
+.brand{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.brand-title{font-weight:800;font-size:20px}
+.picker{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--border);padding:7px 10px;border-radius:12px}
+.picker label{margin:0;font-size:12px;color:var(--muted)}
+select{background:#111318;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 34px 8px 10px;cursor:pointer}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}.toolbar-spacer{flex:1}
+button{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:9px 13px;cursor:pointer}
+button:hover{filter:brightness(1.08)}button.primary{background:var(--accent)}button.danger{border-color:var(--danger)}
+button:disabled{opacity:.4;cursor:not-allowed;filter:none}
+.status{font-size:13px;color:var(--muted);margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel)}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px;align-items:start}
+.canvas-wrap{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:10px;overflow:auto}
+svg{width:100%;min-width:980px;height:auto;display:block;user-select:none;-webkit-user-select:none}
+#tables{pointer-events:none}
+.side{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px}.side h3{margin:0 0 10px}
+.card{border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;background:var(--panel2)}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.small{font-size:12px;color:var(--muted)}
+.staff-label{display:block;font-size:12px;color:var(--muted);margin-top:10px}
+input{width:100%;margin-top:5px;padding:9px 10px;border-radius:9px;border:1px solid var(--border);background:#111318;color:var(--text)}
+.drag-handle{cursor:grab;touch-action:none}.drag-handle:active{cursor:grabbing}
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;padding:20px;z-index:9999}
+.modal-backdrop.open{display:flex}.modal{width:min(600px,100%);max-height:80vh;overflow:auto;background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:16px}
+.modal h3{margin:0 0 12px}.save-item{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid var(--border);border-radius:10px;padding:10px;margin:8px 0;background:var(--panel2)}
+.save-item .actions{display:flex;gap:6px;flex-wrap:wrap}.print-header{display:none}
+@media(max-width:1050px){.layout{grid-template-columns:1fr}.side{order:-1}}
+@media print{
+  body{background:#fff!important}.topbar,.toolbar,.status,.side{display:none!important}.app{padding:0}.layout{display:block}
+  .canvas-wrap{border:0;padding:0;background:#fff}svg{min-width:0;width:100%;height:auto}#handles{display:none!important}
+  .print-header{display:flex!important;justify-content:space-between;align-items:flex-end;color:#000;margin:0 0 6mm 0}.print-header h1{font-size:22px;margin:0}.print-header div{font-size:12px}
+  @page{size:landscape;margin:8mm}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-title">Floor Plan Manager</div>
+      <div class="picker"><label>Salle</label>
+        <select id="roomSelect"><option value="loulou">Loulou</option><option value="azur">Azur</option></select>
+      </div>
+      <div class="picker" id="areaPicker" style="display:none"><label>Zone</label>
+        <select id="areaSelect"><option value="dining">Dining Room</option><option value="patio">Patio</option></select>
+      </div>
+    </div>
+    <div class="small" id="roomStateText"></div>
+  </div>
+
+  <div class="toolbar">
+    <button id="newSection" class="primary">+ Nouvelle section</button>
+    <button id="finishSection" disabled>Fermer la section</button>
+    <button id="undoPoint" disabled>↶ Point</button>
+    <button id="deleteSection">Supprimer dernière</button>
+    <button id="clearAll" class="danger">Tout effacer</button>
+    <div class="toolbar-spacer"></div>
+    <button id="templateBtn">⚡ Template</button>
+    <button id="saveNow">💾 Sauvegarder la journée</button>
+    <button id="historyBtn">📁 Sauvegardes</button>
+    <button id="printPlan">🖨 Imprimer / PDF</button>
+  </div>
+
+  <div class="status" id="statusText"></div>
+  <div class="print-header"><h1 id="printRoomName"></h1><div id="printDate"></div></div>
+
+  <div class="layout">
+    <div class="canvas-wrap">
+      <svg id="plan" viewBox="0 0 1450 820">
+        <rect x="8" y="8" width="1434" height="804" rx="8" fill="#151515" stroke="#323844"/>
+        <g id="sectionFills"></g><g id="tables"></g><g id="sectionLines"></g><g id="sectionLabels"></g><g id="handles"></g>
+      </svg>
+    </div>
+    <aside class="side">
+      <h3 id="sideTitle">Sections & Staff</h3>
+      <div id="summary"></div>
+      <div id="unassigned" class="card"></div>
+    </aside>
+  </div>
+</div>
+
+<div id="historyModal" class="modal-backdrop"><div class="modal">
+  <div class="row"><div><h3 id="historyTitle">Sauvegardes</h3><div class="small">Archives séparées par salle et zone.</div></div><button id="closeHistory">Fermer</button></div>
+  <div id="historyList"></div>
+</div></div>
+
+<div id="templateModal" class="modal-backdrop"><div class="modal">
+  <div class="row"><div><h3 id="templateTitle">Template</h3><div class="small">Le template conserve les sections mais vide Server/Busser au chargement.</div></div><button id="closeTemplate">Fermer</button></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+    <button id="saveTemplate" class="primary">💾 Enregistrer comme template</button>
+    <button id="loadTemplate">⚡ Charger le template</button>
+  </div>
+  <div id="templateStatus" class="small" style="margin-top:12px"></div>
+</div></div>
+
+<script>
+(()=>{
+const ACTIVE_ROOM_KEY='fpm_v4_active_room', ACTIVE_AREA_KEY='fpm_v4_active_area';
+const NS='http://www.w3.org/2000/svg';
+const E=(t,a={})=>{const e=document.createElementNS(NS,t);Object.entries(a).forEach(([k,v])=>e.setAttribute(k,v));return e};
+
+const defs={
+ loulou:{name:'Loulou',areas:{main:{name:'Main Floor',tables:[]}}},
+ azur:{name:'Azur',areas:{dining:{name:'Dining Room',tables:[]},patio:{name:'Patio',tables:[]}}}
+};
+const add=(arr,name,x,y,c=2,shape='sq',w=42,h=34)=>arr.push({name:String(name),x,y,c,shape,w,h});
+
+/* LOULOU */
+const L=defs.loulou.areas.main.tables;
+add(L,70,80,65,4.5,'round');[71,72,73,74,75,76,77,78,79].forEach((n,i)=>add(L,n,80,145+i*56));add(L,'79B',110,690,4.5,'round');
+add(L,'49B',220,65,2,'round');[49,48,47,46,45,44,43,42,41,40,39,38].forEach((n,i)=>add(L,n,315+i*55,55,2,'sq',40,36));
+[57,56,55,54].forEach((n,i)=>add(L,n,215+i*48,175,2,'sq',44,38));[53,52,51,50].forEach((n,i)=>add(L,n,480+i*112,180,4,'sq',78,58));
+[[60,245,295],[65,325,295],[61,245,375],[66,325,375],[62,245,455],[67,325,455],[63,245,535],[68,325,535],[64,245,615],[69,325,615]].forEach(a=>add(L,...a));
+add(L,80,470,300,4.5,'round');add(L,82,705,300,4.5,'round');
+[112,111,110,109].forEach((n,i)=>add(L,n,535+i*48,355,2,'diamond',26,26));[113,114,115,116,117,118,119,120,121].forEach((n,i)=>add(L,n,495,390+i*43,2,'diamond',26,26));[108,107,106,105,104,103,102,101].forEach((n,i)=>add(L,n,725,390+i*43,2,'diamond',26,26));
+add(L,30,875,350,6,'sq',86,128);add(L,31,875,500,6,'sq',86,128);add(L,32,865,665,6,'sq',86,128);
+[20,21,22,23,'23B'].forEach((n,i)=>add(L,n,1080,60+i*76,2,'sq',44,40));add(L,10,1360,95);add(L,11,1360,225);add(L,12,1360,355);
+[['24C',1010,420],['24B',1080,420],[24,1140,420],['14B',1270,420],[14,1340,420],['25C',1010,505],['25B',1080,505],[25,1140,505],['15B',1270,505],[15,1340,505],['26C',1010,590],['26B',1080,590],[26,1140,590],['16B',1270,590],[16,1340,590],[19,1170,650],['27C',1010,700],['27B',1080,700],[27,1140,700],['17B',1270,700],[17,1340,700]].forEach(a=>add(L,...a));
+add(L,18,1360,770,4.5,'round');
+
+/* AZUR DINING ROOM — traced from Toast screenshot */
+const D=defs.azur.areas.dining.tables;
+add(D,20,185,140,5,'sq',110,60);
+[21,22,23,24,25].forEach((n,i)=>add(D,n,445+i*112,145,2,'sq',54,48));
+add(D,14,95,320,3,'round');add(D,15,265,320,2,'sq',62,52);add(D,16,415,320,2,'sq',62,52);
+add(D,30,925,320,2,'sq',54,48);add(D,31,1080,320,2,'sq',62,52);add(D,32,1265,320,3,'round');
+add(D,12,70,500,2,'sq',78,52);add(D,11,70,610,2,'sq',78,52);add(D,10,70,715,3,'round');
+add(D,33,1275,455,2,'sq',62,48);add(D,34,1275,585,2,'sq',62,48);add(D,35,1275,715,3,'round');
+[43,42,41,40].forEach((n,i)=>add(D,n,460+i*120,660,2,'sq',58,48));
+[50,51,52,53,54,55,56,57,58,59].forEach((n,i)=>{
+  const xs=[95,225,335,440,550,660,770,890,1010,1130];
+  add(D,n,xs[i],795-(i>=2?0:65),1,'round');
+});
+
+/* AZUR PATIO — traced from Toast screenshot */
+const P=defs.azur.areas.patio.tables;
+add(P,102,130,170,4,'round');add(P,101,130,390,4,'round');add(P,100,130,610,4,'round');
+add(P,103,500,205,2,'sq',78,80);add(P,104,500,470,2,'sq',78,80);
+add(P,106,925,240,5,'round');add(P,105,925,500,5,'round');
+add(P,107,1270,150,2,'sq',82,80);add(P,108,1270,365,2,'sq',82,80);add(P,109,1270,575,2,'sq',82,80);
+
+const svg=document.getElementById('plan'),tg=document.getElementById('tables'),fillG=document.getElementById('sectionFills'),lineG=document.getElementById('sectionLines'),labelG=document.getElementById('sectionLabels'),handleG=document.getElementById('handles');
+const summary=document.getElementById('summary'),unassignedBox=document.getElementById('unassigned');
+const roomSelect=document.getElementById('roomSelect'),areaPicker=document.getElementById('areaPicker'),areaSelect=document.getElementById('areaSelect'),roomStateText=document.getElementById('roomStateText'),statusText=document.getElementById('statusText'),sideTitle=document.getElementById('sideTitle'),printRoomName=document.getElementById('printRoomName'),printDate=document.getElementById('printDate');
+const btnNew=document.getElementById('newSection'),btnFinish=document.getElementById('finishSection'),btnUndo=document.getElementById('undoPoint'),btnDelete=document.getElementById('deleteSection'),btnClear=document.getElementById('clearAll'),btnPrint=document.getElementById('printPlan'),btnSave=document.getElementById('saveNow'),historyBtn=document.getElementById('historyBtn'),templateBtn=document.getElementById('templateBtn');
+const historyModal=document.getElementById('historyModal'),historyList=document.getElementById('historyList'),historyTitle=document.getElementById('historyTitle'),closeHistory=document.getElementById('closeHistory');
+const templateModal=document.getElementById('templateModal'),templateTitle=document.getElementById('templateTitle'),closeTemplate=document.getElementById('closeTemplate'),saveTemplateBtn=document.getElementById('saveTemplate'),loadTemplateBtn=document.getElementById('loadTemplate'),templateStatus=document.getElementById('templateStatus');
+
+let currentRoomId=localStorage.getItem(ACTIVE_ROOM_KEY)||'loulou';
+let currentAreaId=localStorage.getItem(ACTIVE_AREA_KEY)||'main';
+if(!defs[currentRoomId])currentRoomId='loulou';
+if(!defs[currentRoomId].areas[currentAreaId])currentAreaId=currentRoomId==='azur'?'dining':'main';
+let sections=[],active=null,counter=1;
+const colors=['#2f80ed','#27ae60','#f2994a','#bb6bd9','#eb5757','#56ccf2','#f2c94c'];
+
+const room=()=>defs[currentRoomId], area=()=>room().areas[currentAreaId], tables=()=>area().tables;
+const scope=()=>`${currentRoomId}_${currentAreaId}`;
+const keyFor=kind=>`fpm_v4_${scope()}_${kind}`;
+
+function migrateOldLoulou(){
+ const old=[['loulou_floor_plan_v2_current','fpm_v4_loulou_main_current'],['loulou_floor_plan_v2_history','fpm_v4_loulou_main_history'],['loulou_floor_plan_v2_template','fpm_v4_loulou_main_template']];
+ old.forEach(([a,b])=>{if(!localStorage.getItem(b)&&localStorage.getItem(a))localStorage.setItem(b,localStorage.getItem(a))});
+}
+
+function pSvg(e){const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;return pt.matrixTransform(svg.getScreenCTM().inverse())}
+function inside(pt,poly){let x=pt.x,y=pt.y,z=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];const hit=((a.y>y)!=(b.y>y))&&(x<(b.x-a.x)*(y-a.y)/((b.y-a.y)||1e-9)+a.x);if(hit)z=!z}return z}
+function tableSection(t){for(let i=sections.length-1;i>=0;i--){const s=sections[i];if(s.closed&&s.points.length>=3&&inside(t,s.points))return s}return null}
+const ptsString=s=>s.points.map(p=>`${p.x},${p.y}`).join(' ');
+const sectionTables=s=>tables().filter(t=>tableSection(t)===s);
+const sectionCovers=s=>sectionTables(s).reduce((a,t)=>a+t.c,0);
+function centroid(s){return{x:s.points.reduce((a,p)=>a+p.x,0)/s.points.length,y:s.points.reduce((a,p)=>a+p.y,0)/s.points.length}}
+
+function snapshot(){return{sections:sections.map(s=>({name:s.name,server:s.server||'',busser:s.busser||'',closed:s.closed,color:s.color,points:s.points.map(p=>({x:p.x,y:p.y}))})),counter}}
+function saveState(){localStorage.setItem(keyFor('current'),JSON.stringify(snapshot()))}
+function loadState(){sections=[];active=null;counter=1;try{const raw=localStorage.getItem(keyFor('current'));if(!raw)return;const d=JSON.parse(raw);sections=(d.sections||[]).map(s=>({...s,points:(s.points||[]).map(p=>({x:p.x,y:p.y}))}));counter=d.counter||sections.length+1}catch(e){}}
+function applySnapshot(d,clearStaff=false){sections=(d.sections||[]).map(s=>({name:s.name,server:clearStaff?'':(s.server||''),busser:clearStaff?'':(s.busser||''),closed:!!s.closed,color:s.color||colors[0],points:(s.points||[]).map(p=>({x:p.x,y:p.y}))}));counter=d.counter||sections.length+1;active=null;renderAll();updateSummary();saveState()}
+function datedLabel(d=new Date()){return d.toLocaleDateString(undefined,{year:'numeric',month:'2-digit',day:'2-digit'})+' '+d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}
+
+function drawTables(){
+ tg.replaceChildren();
+ tables().forEach(t=>{
+   const g=E('g');let sh;
+   if(t.shape==='round')sh=E('circle',{cx:t.x,cy:t.y,r:34,fill:'#151515',stroke:'#d8e3ee','stroke-width':2,'stroke-dasharray':'5 4'});
+   else if(t.shape==='diamond')sh=E('rect',{x:t.x-t.w/2,y:t.y-t.h/2,width:t.w,height:t.h,fill:'#151515',stroke:'#d8e3ee','stroke-width':1.5,'stroke-dasharray':'4 3',transform:`rotate(45 ${t.x} ${t.y})`});
+   else sh=E('rect',{x:t.x-t.w/2,y:t.y-t.h/2,width:t.w,height:t.h,rx:6,fill:'#151515',stroke:'#d8e3ee','stroke-width':2,'stroke-dasharray':'5 4'});
+   const tx=E('text',{x:t.x,y:t.y+6,'text-anchor':'middle','font-size':t.shape==='diamond'?11:18,'font-weight':'700',fill:'#fff'});tx.textContent=t.name;g.append(sh,tx);tg.append(g);
+ });
+}
+
+function createSectionVisual(s){
+ s.fillEl=E('polygon',{fill:s.color,'fill-opacity':'0.13',stroke:'none','pointer-events':'none'});
+ s.lineEl=E(s.closed?'polygon':'polyline',{fill:'none',stroke:s.color,'stroke-width':7,'stroke-linejoin':'round','stroke-linecap':'round','pointer-events':'none'});
+ fillG.append(s.fillEl);lineG.append(s.lineEl);
+ s.points.forEach(p=>{
+   const hit=E('circle',{r:26,fill:'transparent',class:'drag-handle','data-handle':'1'}),dot=E('circle',{r:11,fill:'#fff',stroke:s.color,'stroke-width':4,'pointer-events':'none'});
+   hit.setAttribute('cx',p.x);hit.setAttribute('cy',p.y);dot.setAttribute('cx',p.x);dot.setAttribute('cy',p.y);let drag=false;
+   hit.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();drag=true;hit.setPointerCapture(e.pointerId)});
+   hit.addEventListener('pointermove',e=>{if(!drag)return;e.preventDefault();e.stopPropagation();const q=pSvg(e);p.x=Math.max(15,Math.min(1435,q.x));p.y=Math.max(15,Math.min(805,q.y));hit.setAttribute('cx',p.x);hit.setAttribute('cy',p.y);dot.setAttribute('cx',p.x);dot.setAttribute('cy',p.y);const pts=ptsString(s);s.lineEl.setAttribute('points',pts);if(s.closed)s.fillEl.setAttribute('points',pts);drawLabels()});
+   hit.addEventListener('pointerup',e=>{if(!drag)return;drag=false;try{hit.releasePointerCapture(e.pointerId)}catch(_){}updateSummary();saveState()});
+   hit.addEventListener('pointercancel',()=>drag=false);handleG.append(hit,dot);
+ });
+ const pts=ptsString(s);s.lineEl.setAttribute('points',pts);if(s.closed)s.fillEl.setAttribute('points',pts);
+}
+
+function drawLabels(){
+ labelG.replaceChildren();
+ sections.forEach(s=>{
+   if(!s.closed||s.points.length<3)return;
+   const c=centroid(s),covers=sectionCovers(s),server=(s.server||'').trim(),busser=(s.busser||'').trim();
+   const g=E('g',{'pointer-events':'none'}),bg=E('rect',{x:c.x-76,y:c.y-42,width:152,height:84,rx:10,fill:'#111','fill-opacity':'0.86',stroke:s.color,'stroke-width':2}),sec=E('text',{x:c.x,y:c.y-22,'text-anchor':'middle','font-size':11,'font-weight':'600',fill:'#bbb'}),sv=E('text',{x:c.x,y:c.y,'text-anchor':'middle','font-size':15,'font-weight':'700',fill:'#fff'}),bs=E('text',{x:c.x,y:c.y+20,'text-anchor':'middle','font-size':13,'font-weight':'600',fill:'#fff'}),cv=E('text',{x:c.x,y:c.y+37,'text-anchor':'middle','font-size':11,'font-weight':'600',fill:'#ddd'});
+   sec.textContent=s.name;sv.textContent=server?`Server: ${server}`:'Server: —';bs.textContent=busser?`Busser: ${busser}`:'Busser: —';cv.textContent=`${Number.isInteger(covers)?covers:covers.toFixed(1)} covers`;g.append(bg,sec,sv,bs,cv);labelG.append(g);
+ });
+}
+
+function renderAll(){fillG.replaceChildren();lineG.replaceChildren();handleG.replaceChildren();sections.forEach(createSectionVisual);btnFinish.disabled=!(active&&active.points.length>=3);btnUndo.disabled=!(active&&active.points.length>0);btnDelete.disabled=!sections.length;btnClear.disabled=!sections.length;drawLabels();updateTop()}
+function updateSummary(){
+ summary.replaceChildren();const assigned=new Set();
+ sections.forEach(s=>{
+  if(!s.closed)return;const tabs=sectionTables(s);tabs.forEach(t=>assigned.add(t.name));const covers=tabs.reduce((a,t)=>a+t.c,0);
+  const card=document.createElement('div');card.className='card';const top=document.createElement('div');top.className='row';top.innerHTML=`<div><b>${s.name}</b><div class="small">${tabs.length} tables</div></div><div><b>${Number.isInteger(covers)?covers:covers.toFixed(1)}</b></div>`;
+  const sl=document.createElement('label');sl.className='staff-label';sl.textContent='Server';const si=document.createElement('input');si.placeholder='Ex: James';si.value=s.server||'';si.oninput=()=>{s.server=si.value;drawLabels();saveState()};sl.append(si);
+  const bl=document.createElement('label');bl.className='staff-label';bl.textContent='Busser';const bi=document.createElement('input');bi.placeholder='Ex: Alex';bi.value=s.busser||'';bi.oninput=()=>{s.busser=bi.value;drawLabels();saveState()};bl.append(bi);
+  const list=document.createElement('div');list.className='small';list.style.marginTop='9px';list.textContent=tabs.length?tabs.map(t=>t.name).join(', '):'Aucune table';card.append(top,sl,bl,list);summary.append(card);
+ });
+ const free=tables().filter(t=>!assigned.has(t.name)),total=free.reduce((a,t)=>a+t.c,0);unassignedBox.innerHTML=`<div><b>Non assigné</b></div><div>${Number.isInteger(total)?total:total.toFixed(1)} couverts · ${free.length} tables</div>`;
+ drawLabels();
+}
+
+function updateTop(){
+ roomSelect.value=currentRoomId;areaPicker.style.display=currentRoomId==='azur'?'flex':'none';if(currentRoomId==='azur')areaSelect.value=currentAreaId;
+ const label=currentRoomId==='azur'?`${room().name} — ${area().name}`:room().name;
+ roomStateText.textContent=label;sideTitle.textContent=`Sections & Staff — ${label}`;statusText.innerHTML=`<b>${label}</b> — plan, sauvegardes de journée et template indépendants.`;printRoomName.textContent=`${label} — Floor Plan`;
+}
+function finalizeActive(){if(!active)return;if(active.points.length>=3)active.closed=true;else sections=sections.filter(s=>s!==active);active=null;saveState()}
+function switchScope(r,a){finalizeActive();saveState();currentRoomId=r;currentAreaId=a;localStorage.setItem(ACTIVE_ROOM_KEY,r);localStorage.setItem(ACTIVE_AREA_KEY,a);loadState();drawTables();renderAll();updateSummary()}
+
+btnNew.onclick=()=>{if(active&&!active.closed){if(active.points.length>=3)active.closed=true;else sections=sections.filter(s=>s!==active)}active={name:`Section ${counter}`,server:'',busser:'',points:[],closed:false,color:colors[(counter-1)%colors.length]};counter++;sections.push(active);renderAll();updateSummary();saveState()};
+btnFinish.onclick=()=>{if(active&&active.points.length>=3){active.closed=true;active=null;renderAll();updateSummary();saveState()}};
+btnUndo.onclick=()=>{if(active&&active.points.length){active.points.pop();renderAll();updateSummary();saveState()}};
+btnDelete.onclick=()=>{if(!sections.length)return;const r=sections.pop();if(active===r)active=null;renderAll();updateSummary();saveState()};
+btnClear.onclick=()=>{if(sections.length&&confirm('Tout effacer sur cette zone ? Les archives déjà sauvegardées restent disponibles.')){sections=[];active=null;counter=1;renderAll();updateSummary();saveState()}};
+btnPrint.onclick=()=>{drawLabels();saveState();printDate.textContent=datedLabel(new Date());requestAnimationFrame(()=>window.print())};
+
+btnSave.onclick=()=>{let h=[];try{h=JSON.parse(localStorage.getItem(keyFor('history'))||'[]')}catch(e){}const now=new Date();h.unshift({id:now.getTime(),label:datedLabel(now),data:snapshot()});localStorage.setItem(keyFor('history'),JSON.stringify(h.slice(0,90)));saveState();alert('Sauvegarde créée : '+datedLabel(now))};
+
+historyBtn.onclick=()=>{historyTitle.textContent=`Sauvegardes — ${currentRoomId==='azur'?room().name+' / '+area().name:room().name}`;let h=[];try{h=JSON.parse(localStorage.getItem(keyFor('history'))||'[]')}catch(e){}historyList.innerHTML='';if(!h.length)historyList.innerHTML='<div class="small" style="margin-top:12px">Aucune sauvegarde pour cette zone.</div>';h.forEach(item=>{const row=document.createElement('div');row.className='save-item';const info=document.createElement('div');info.innerHTML=`<b>${item.label}</b><div class="small">${item.data.sections?.length||0} sections</div>`;const acts=document.createElement('div');acts.className='actions';const load=document.createElement('button');load.textContent='Charger';load.onclick=()=>{if(confirm('Remplacer le plan actuel ?')){applySnapshot(item.data,false);historyModal.classList.remove('open')}};const del=document.createElement('button');del.textContent='Supprimer';del.onclick=()=>{const x=h.filter(v=>v.id!==item.id);localStorage.setItem(keyFor('history'),JSON.stringify(x));historyBtn.click()};acts.append(load,del);row.append(info,acts);historyList.append(row)});historyModal.classList.add('open')};
+closeHistory.onclick=()=>historyModal.classList.remove('open');historyModal.onclick=e=>{if(e.target===historyModal)historyModal.classList.remove('open')};
+
+templateBtn.onclick=()=>{templateTitle.textContent=`Template — ${currentRoomId==='azur'?room().name+' / '+area().name:room().name}`;templateStatus.textContent=localStorage.getItem(keyFor('template'))?'Un template est enregistré.':'Aucun template enregistré.';templateModal.classList.add('open')};
+closeTemplate.onclick=()=>templateModal.classList.remove('open');templateModal.onclick=e=>{if(e.target===templateModal)templateModal.classList.remove('open')};
+saveTemplateBtn.onclick=()=>{if(!sections.some(s=>s.closed)){alert('Crée au moins une section avant d’enregistrer un template.');return}localStorage.setItem(keyFor('template'),JSON.stringify(snapshot()));templateStatus.textContent='Template enregistré.'};
+loadTemplateBtn.onclick=()=>{const raw=localStorage.getItem(keyFor('template'));if(!raw){alert('Aucun template enregistré.');return}if(confirm('Charger le template ? Le plan actuel sera remplacé et Server/Busser vidés.')){applySnapshot(JSON.parse(raw),true);templateModal.classList.remove('open')}};
+
+roomSelect.onchange=()=>switchScope(roomSelect.value,roomSelect.value==='azur'?'dining':'main');
+areaSelect.onchange=()=>switchScope('azur',areaSelect.value);
+
+svg.addEventListener('click',e=>{if(!active||active.closed)return;if(e.target&&e.target.dataset&&e.target.dataset.handle==='1')return;const p=pSvg(e);if(p.x<15||p.x>1435||p.y<15||p.y>805)return;active.points.push({x:p.x,y:p.y});renderAll();updateSummary();saveState()});
+svg.addEventListener('dragstart',e=>e.preventDefault());document.addEventListener('selectstart',e=>{if(e.target.closest&&e.target.closest('svg'))e.preventDefault()});
+window.addEventListener('beforeprint',()=>{drawLabels();saveState();printDate.textContent=datedLabel(new Date())});
+
+migrateOldLoulou();loadState();drawTables();renderAll();updateSummary();
+})();
+</script>
+</body>
+</html>
